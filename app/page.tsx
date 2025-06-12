@@ -1,103 +1,115 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import { useState } from 'react';
+import { BrowserProviderContractRunner } from '@circles-sdk/adapter-ethers';
+import { Sdk } from '@circles-sdk/sdk';
+import { circlesConfig } from './lib/circlesConfig';
+import { QRCodeSVG } from 'qrcode.react';                        // QR component  [oai_citation:7‡npmjs.com](https://www.npmjs.com/package/qrcode.react?utm_source=chatgpt.com)
+
+/* ---------- MetaMask / Gnosis helpers ---------- */
+const GNOSIS: any = {
+  chainId: '0x64',                                              // 100 dec → 0x64  [oai_citation:8‡support.metamask.io](https://support.metamask.io/more-web3/learn/how-to-connect-to-the-gnosis-chain-network-formerly-xdai/?utm_source=chatgpt.com)
+  chainName: 'Gnosis Chain',
+  nativeCurrency: { name: 'xDAI', symbol: 'xDAI', decimals: 18 },
+  rpcUrls: ['https://rpc.gnosischain.com'],                     // public RPC  [oai_citation:9‡docs.gnosischain.com](https://docs.gnosischain.com/tools/RPC%20Providers/?utm_source=chatgpt.com)
+  blockExplorerUrls: ['https://gnosisscan.io']
+};
+
+async function ensureGnosis(eth: any) {
+  await eth.request({
+    method: 'wallet_switchEthereumChain',
+    params: [{ chainId: GNOSIS.chainId }]
+  }).catch(async (e: any) => {
+    if (e.code === 4902) {
+      await eth.request({ method: 'wallet_addEthereumChain', params: [GNOSIS] }); // MetaMask add-network flow  [oai_citation:10‡docs.gnosischain.com](https://docs.gnosischain.com/developers/Interact%20on%20Gnosis/metamask?utm_source=chatgpt.com)
+    } else { throw e; }
+  });
+}
+
+/* ---------- React page ---------- */
+export default function CirclesOrg() {
+  const [address, setAddress] = useState<string>();
+  const [orgAddr, setOrgAddr] = useState<string>();
+  const [busy, setBusy]       = useState(false);
+  const [err, setErr]         = useState<string>();
+
+  /* connects wallet and stores an SDK instance on window for reuse */
+  const connect = async () => {
+    try {
+      setErr(undefined);
+      const eth = (window as any).ethereum;
+      if (!eth?.isMetaMask) throw new Error('MetaMask not found');
+      const [addr] = await eth.request({ method: 'eth_requestAccounts' });
+      await ensureGnosis(eth);
+
+      /* Adapter ➜ init ➜ SDK  (correct order!) */
+      const adapter = new BrowserProviderContractRunner();        // class from adapter-ethers  [oai_citation:11‡docs.aboutcircles.com](https://docs.aboutcircles.com/tutorials-and-examples/setting-up-circles-sdk-with-react-and-javascript?utm_source=chatgpt.com)
+      await adapter.init();                                       // MUST call or runner error 
+      (window as any)._sdk = new Sdk(adapter, circlesConfig);      // stable API  [oai_citation:12‡docs.aboutcircles.com](https://docs.aboutcircles.com/tutorials-and-examples/setting-up-circles-sdk-with-react-and-javascript?utm_source=chatgpt.com)
+      setAddress(addr);
+    } catch (e: any) { setErr(e.message ?? String(e)); }
+  };
+
+  const createOrg = async (name: string) => {
+    const sdk: Sdk | undefined = (window as any)._sdk;
+    if (!sdk) return;
+    try {
+      setBusy(true); setErr(undefined);
+      /* Pass a Profile object ➜ no CID validation needed */
+      const avatar = await sdk.registerOrganizationV2({ name });   // documented overload  [oai_citation:13‡docs.aboutcircles.com](https://docs.aboutcircles.com/developer-docs/circles-avatars/organization-avatars/creation-of-organizations?utm_source=chatgpt.com)
+      setOrgAddr(avatar.address);
+    } catch (e: any) { setErr(e.message ?? 'Transaction failed'); }
+    finally { setBusy(false); }
+  };
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <main className="flex flex-col items-center gap-6 py-12 px-4
+                     bg-gradient-to-br from-slate-50 to-slate-200 min-h-screen">
+      <h1 className="text-3xl font-extrabold text-sky-600">Circles V2 Org Creator</h1>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+      {!address ? (
+        <button
+          onClick={connect}
+          className="px-6 py-3 bg-gradient-to-r from-sky-600 to-emerald-400
+                     text-white rounded-md shadow font-semibold">
+          Connect MetaMask
+        </button>
+      ) : (
+        <OrgWizard busy={busy} onCreate={createOrg} />
+      )}
+
+      {orgAddr && (
+        <div className="flex flex-col items-center gap-4">
+          <p className="text-emerald-700 font-semibold">
+            ✅ Avatar deployed at {orgAddr.slice(0,6)}…{orgAddr.slice(-4)}
+          </p>
+          <QRCodeSVG value={orgAddr} size={164} className="rounded-md shadow" />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+      )}
+
+      {err && <p className="text-red-600 text-center">{err}</p>}
+    </main>
+  );
+}
+
+/* ----- inner form component ----- */
+function OrgWizard({ busy, onCreate }:{ busy:boolean; onCreate:(n:string)=>void }) {
+  const [name,setName] = useState('');
+  return (
+    <>
+      <input
+        value={name}
+        onChange={e=>setName(e.target.value)}
+        placeholder="Organisation name"
+        className="w-72 border rounded p-2 text-center"
+      />
+      <button
+        disabled={!name || busy}
+        onClick={()=>onCreate(name)}
+        className="px-6 py-3 mt-2 bg-gradient-to-r from-sky-600 to-emerald-400
+                   text-white rounded-md shadow font-semibold disabled:opacity-50">
+        {busy ? 'Creating…' : 'Register Org (V2)'}
+      </button>
+    </>
   );
 }
