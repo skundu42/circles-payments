@@ -1,15 +1,26 @@
-import './globals.css';
+import './globals.css';      // adjust path if needed
 import type { Metadata } from 'next';
+import { WalletProvider } from './context/WalletContext';
+import ClientShell from './ClientShell';
 
 export const metadata: Metadata = {
-  title: 'Circles Org – v2 Demo',
-  description: 'MetaMask login → Circles V2 Org signup → QR output'
+  title: 'Circles Org Creator',
+  description: 'Ant-Design dApp to mint Circles V2 organisations'
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gray-50">{children}</body>
+      <body>
+        {/* Wrap in our WalletProvider */}
+        <WalletProvider>
+          <ClientShell>{children}</ClientShell>
+        </WalletProvider>
+      </body>
     </html>
   );
 }

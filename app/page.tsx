@@ -1,115 +1,182 @@
 'use client';
 
-import { useState } from 'react';
-import { BrowserProviderContractRunner } from '@circles-sdk/adapter-ethers';
-import { Sdk } from '@circles-sdk/sdk';
-import { circlesConfig } from './lib/circlesConfig';
-import { QRCodeSVG } from 'qrcode.react';                        // QR component  [oai_citation:7‡npmjs.com](https://www.npmjs.com/package/qrcode.react?utm_source=chatgpt.com)
+import { useState, useContext } from 'react';
+import {
+  Tabs,                // ← add this
+  Button,
+  Card,
+  Form,
+  Input,
+  QRCode,
+  Result,
+  Space,
+  message
+} from 'antd';
+import {
+  WalletOutlined,
+  PlusCircleOutlined,
+  CheckCircleOutlined,
+  LoginOutlined
+} from '@ant-design/icons';
+import { useWallet } from './context/WalletContext';
 
-/* ---------- MetaMask / Gnosis helpers ---------- */
-const GNOSIS: any = {
-  chainId: '0x64',                                              // 100 dec → 0x64  [oai_citation:8‡support.metamask.io](https://support.metamask.io/more-web3/learn/how-to-connect-to-the-gnosis-chain-network-formerly-xdai/?utm_source=chatgpt.com)
-  chainName: 'Gnosis Chain',
-  nativeCurrency: { name: 'xDAI', symbol: 'xDAI', decimals: 18 },
-  rpcUrls: ['https://rpc.gnosischain.com'],                     // public RPC  [oai_citation:9‡docs.gnosischain.com](https://docs.gnosischain.com/tools/RPC%20Providers/?utm_source=chatgpt.com)
-  blockExplorerUrls: ['https://gnosisscan.io']
-};
+// Optional: pull TabPane out if you prefer that syntax
+const { TabPane } = Tabs;
 
-async function ensureGnosis(eth: any) {
-  await eth.request({
-    method: 'wallet_switchEthereumChain',
-    params: [{ chainId: GNOSIS.chainId }]
-  }).catch(async (e: any) => {
-    if (e.code === 4902) {
-      await eth.request({ method: 'wallet_addEthereumChain', params: [GNOSIS] }); // MetaMask add-network flow  [oai_citation:10‡docs.gnosischain.com](https://docs.gnosischain.com/developers/Interact%20on%20Gnosis/metamask?utm_source=chatgpt.com)
-    } else { throw e; }
-  });
-}
+export default function Home() {
+  const { sdk, orgAddr, setOrgAddr } = useWallet();
+  const [messageApi, contextHolder] = message.useMessage();
+  const [activeTab, setActiveTab] = useState<'create' | 'connect'>('create');
 
-/* ---------- React page ---------- */
-export default function CirclesOrg() {
-  const [address, setAddress] = useState<string>();
-  const [orgAddr, setOrgAddr] = useState<string>();
-  const [busy, setBusy]       = useState(false);
-  const [err, setErr]         = useState<string>();
-
-  /* connects wallet and stores an SDK instance on window for reuse */
-  const connect = async () => {
-    try {
-      setErr(undefined);
-      const eth = (window as any).ethereum;
-      if (!eth?.isMetaMask) throw new Error('MetaMask not found');
-      const [addr] = await eth.request({ method: 'eth_requestAccounts' });
-      await ensureGnosis(eth);
-
-      /* Adapter ➜ init ➜ SDK  (correct order!) */
-      const adapter = new BrowserProviderContractRunner();        // class from adapter-ethers  [oai_citation:11‡docs.aboutcircles.com](https://docs.aboutcircles.com/tutorials-and-examples/setting-up-circles-sdk-with-react-and-javascript?utm_source=chatgpt.com)
-      await adapter.init();                                       // MUST call or runner error 
-      (window as any)._sdk = new Sdk(adapter, circlesConfig);      // stable API  [oai_citation:12‡docs.aboutcircles.com](https://docs.aboutcircles.com/tutorials-and-examples/setting-up-circles-sdk-with-react-and-javascript?utm_source=chatgpt.com)
-      setAddress(addr);
-    } catch (e: any) { setErr(e.message ?? String(e)); }
-  };
-
-  const createOrg = async (name: string) => {
-    const sdk: Sdk | undefined = (window as any)._sdk;
+  // Create new org
+  const onCreate = async ({ name }: { name: string }) => {
     if (!sdk) return;
     try {
-      setBusy(true); setErr(undefined);
-      /* Pass a Profile object ➜ no CID validation needed */
-      const avatar = await sdk.registerOrganizationV2({ name });   // documented overload  [oai_citation:13‡docs.aboutcircles.com](https://docs.aboutcircles.com/developer-docs/circles-avatars/organization-avatars/creation-of-organizations?utm_source=chatgpt.com)
+      const hide = messageApi.loading('Submitting transaction…', 0);
+      const avatar = await sdk.registerOrganizationV2({ name });
+      hide();
       setOrgAddr(avatar.address);
-    } catch (e: any) { setErr(e.message ?? 'Transaction failed'); }
-    finally { setBusy(false); }
+      messageApi.success('Organisation created');
+    } catch (e: any) {
+      messageApi.error(e.message ?? 'Transaction failed');
+    }
+  };
+
+  // Connect existing org
+  const onConnect = async ({ address }: { address: string }) => {
+    if (!sdk) return;
+    try {
+      const hide = messageApi.loading('Checking organisation…', 0);
+      await sdk.getAvatar(address);
+      hide();
+      setOrgAddr(address);
+      messageApi.success('Organisation connected');
+    } catch (e: any) {
+      messageApi.error('Failed to connect: ' + (e.message ?? String(e)));
+    }
   };
 
   return (
-    <main className="flex flex-col items-center gap-6 py-12 px-4
-                     bg-gradient-to-br from-slate-50 to-slate-200 min-h-screen">
-      <h1 className="text-3xl font-extrabold text-sky-600">Circles V2 Org Creator</h1>
-
-      {!address ? (
-        <button
-          onClick={connect}
-          className="px-6 py-3 bg-gradient-to-r from-sky-600 to-emerald-400
-                     text-white rounded-md shadow font-semibold">
-          Connect MetaMask
-        </button>
-      ) : (
-        <OrgWizard busy={busy} onCreate={createOrg} />
-      )}
-
-      {orgAddr && (
-        <div className="flex flex-col items-center gap-4">
-          <p className="text-emerald-700 font-semibold">
-            ✅ Avatar deployed at {orgAddr.slice(0,6)}…{orgAddr.slice(-4)}
-          </p>
-          <QRCodeSVG value={orgAddr} size={164} className="rounded-md shadow" />
-        </div>
-      )}
-
-      {err && <p className="text-red-600 text-center">{err}</p>}
-    </main>
-  );
-}
-
-/* ----- inner form component ----- */
-function OrgWizard({ busy, onCreate }:{ busy:boolean; onCreate:(n:string)=>void }) {
-  const [name,setName] = useState('');
-  return (
     <>
-      <input
-        value={name}
-        onChange={e=>setName(e.target.value)}
-        placeholder="Organisation name"
-        className="w-72 border rounded p-2 text-center"
-      />
-      <button
-        disabled={!name || busy}
-        onClick={()=>onCreate(name)}
-        className="px-6 py-3 mt-2 bg-gradient-to-r from-sky-600 to-emerald-400
-                   text-white rounded-md shadow font-semibold disabled:opacity-50">
-        {busy ? 'Creating…' : 'Register Org (V2)'}
-      </button>
+      {contextHolder}
+
+      <Card style={{ maxWidth: 500, margin: '0 auto' }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={(key) => {
+            setActiveTab(key as any);
+            setOrgAddr(undefined);
+          }}
+        >
+          <TabPane
+            key="create"
+            tab={
+              <span>
+                <PlusCircleOutlined /> New Organisation
+              </span>
+            }
+          >
+            {orgAddr && activeTab === 'create' ? (
+              <Result
+                status="success"
+                title="Organisation created!"
+                subTitle={
+                  <Space direction="vertical" size="small" align="center">
+                    <span>
+                      Address:&nbsp;
+                      <code>{orgAddr}</code>
+                    </span>
+                    <QRCode value={orgAddr} />
+                  </Space>
+                }
+                icon={<CheckCircleOutlined />}
+              />
+            ) : (
+              <Form
+                layout="vertical"
+                onFinish={onCreate}
+                autoComplete="off"
+                requiredMark={false}
+              >
+                <Form.Item
+                  label="Organisation name"
+                  name="name"
+                  rules={[{ required: true, whitespace: true }]}
+                >
+                  <Input placeholder="e.g. Circles Café" allowClear />
+                </Form.Item>
+                <Form.Item>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    icon={<PlusCircleOutlined />}
+                    block
+                  >
+                    Register Org
+                  </Button>
+                </Form.Item>
+              </Form>
+            )}
+          </TabPane>
+
+          <TabPane
+            key="connect"
+            tab={
+              <span>
+                <LoginOutlined /> Connect Existing
+              </span>
+            }
+          >
+            {orgAddr && activeTab === 'connect' ? (
+              <Result
+                status="success"
+                title="Organisation connected!"
+                subTitle={
+                  <Space direction="vertical" size="small" align="center">
+                    <span>
+                      Address:&nbsp;
+                      <code>{orgAddr}</code>
+                    </span>
+                    <QRCode value={orgAddr} />
+                  </Space>
+                }
+                icon={<CheckCircleOutlined />}
+              />
+            ) : (
+              <Form
+                layout="vertical"
+                onFinish={onConnect}
+                autoComplete="off"
+                requiredMark={false}
+              >
+                <Form.Item
+                  label="Organisation address"
+                  name="address"
+                  rules={[
+                    { required: true },
+                    {
+                      pattern: /^0x[a-fA-F0-9]{40}$/,
+                      message: 'Must be a valid 0x... address',
+                    },
+                  ]}
+                >
+                  <Input placeholder="0xABC123…" allowClear />
+                </Form.Item>
+                <Form.Item>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    icon={<LoginOutlined />}
+                    block
+                  >
+                    Connect Org
+                  </Button>
+                </Form.Item>
+              </Form>
+            )}
+          </TabPane>
+        </Tabs>
+      </Card>
     </>
   );
 }
