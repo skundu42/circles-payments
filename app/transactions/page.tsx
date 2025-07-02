@@ -14,6 +14,7 @@ import {
   Statistic,
 } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
+import { formatUnits } from 'ethers';
 import { useWallet } from '../context/WalletContext';
 
 const { Text } = Typography;
@@ -34,6 +35,7 @@ export default function TransactionsPage() {
 
   const [balance, setBalance] = useState<string | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   const refreshRef = useRef<NodeJS.Timer>();
 
@@ -57,14 +59,21 @@ export default function TransactionsPage() {
     if (!sdk || !orgAddr) return;
     setLoadingBalance(true);
     try {
-      // V1 and V2 balances as TimeCircles strings
       const [v1, v2] = await Promise.all([
         sdk.data.getTotalBalance(orgAddr, true),
         sdk.data.getTotalBalanceV2(orgAddr, true),
       ]);
-      // Sum up – both are strings that can be parsed as numbers
-      const total = (parseFloat(v1) || 0) + (parseFloat(v2) || 0);
-      setBalance(total.toFixed(2));
+      const rawTotal = (parseFloat(v1) || 0) + (parseFloat(v2) || 0);
+      const full = rawTotal.toString();
+      let truncatedBalance: string;
+      if (full.includes('.')) {
+        const [intPart, decPart] = full.split('.');
+        const truncated = decPart.slice(0, 3);
+        truncatedBalance = `${intPart}${truncated ? `.${truncated}` : ''}`;
+      } else {
+        truncatedBalance = full;
+      }
+      setBalance(truncatedBalance);
     } catch {
       message.error('Failed to load balance');
       setBalance(null);
@@ -79,20 +88,18 @@ export default function TransactionsPage() {
     loadBalance();
   };
 
-  /* ---------- lifecycle ---------- */
   useEffect(() => {
     refreshAll();
     refreshRef.current = setInterval(refreshAll, 20000);
     return () => clearInterval(refreshRef.current!);
   }, [sdk, orgAddr]);
 
-  /* ---------- pagination ---------- */
   const loadMore = async () => {
     if (!historyQuery) return;
     setLoadingMore(true);
     try {
       const more = await historyQuery.queryNextPage();
-      setRows((prev) => [...prev, ...historyQuery.currentPage.results]);
+      setRows(prev => [...prev, ...historyQuery.currentPage.results]);
       setHasMore(more);
     } catch {
       message.error('Failed to load more');
@@ -101,7 +108,56 @@ export default function TransactionsPage() {
     }
   };
 
-  /* ---------- table columns ---------- */
+  /* ---------- CSV export ---------- */
+  const exportCsv = async () => {
+    if (!sdk || !orgAddr) {
+      message.error('No organisation connected');
+      return;
+    }
+    setExporting(true);
+    try {
+      const q = sdk.data.getTransactionHistory(orgAddr, PAGE_SIZE);
+      let more = await q.queryNextPage();
+      const all: any[] = [...q.currentPage.results];
+      while (more) {
+        more = await q.queryNextPage();
+        all.push(...q.currentPage.results);
+      }
+
+      const header = ['Timestamp', 'Version', 'From', 'To', 'Amount (CRC)', 'Txn Hash'];
+      const lines = all.map(r => {
+        const ts = new Date(r.timestamp * 1000).toISOString();
+        const version = `v${r.version}`;
+        const from = r.from;
+        const to = r.to;
+        const full = formatUnits(r.value, 18);
+        let amt = full;
+        if (full.includes('.')) {
+          const [i, d] = full.split('.');
+          amt = `${i}${d.slice(0, 3) ? `.${d.slice(0, 3)}` : ''}`;
+        }
+        const hash = r.transactionHash;
+        return [ts, version, from, to, amt, hash]
+          .map(field => `"${field}"`)
+          .join(',');
+      });
+
+      const csv = [header.join(','), ...lines].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'transactions.csv');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch {
+      message.error('Failed to export CSV');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const columns = [
     {
       title: 'Timestamp',
@@ -125,11 +181,16 @@ export default function TransactionsPage() {
     },
     {
       title: 'Amount (CRC)',
-      dataIndex: 'timeCircles',
-      render: (val: number | string | null | undefined) => {
-        if (val == null || Number.isNaN(Number(val))) return '–';
-        const num = typeof val === 'string' ? parseFloat(val) : val;
-        return num.toFixed(2);
+      dataIndex: 'value',
+      render: (val: string) => {
+        if (!val) return '–';
+        const full = formatUnits(val, 18);
+        if (full.includes('.')) {
+          const [intPart, decPart] = full.split('.');
+          const truncated = decPart.slice(0, 3);
+          return `${intPart}${truncated ? `.${truncated}` : ''} CRC`;
+        }
+        return `${full} CRC`;
       },
     },
     {
@@ -147,7 +208,6 @@ export default function TransactionsPage() {
     },
   ];
 
-  /* ---------- render ---------- */
   if (!orgAddr) {
     return (
       <Card>
@@ -171,7 +231,14 @@ export default function TransactionsPage() {
         </Col>
       </Row>
 
-      <Card title="Transaction History">
+      <Card
+        title="Transaction History"
+        extra={
+          <Button onClick={exportCsv} loading={exporting}>
+            Export CSV
+          </Button>
+        }
+      >
         {loadingHistory ? (
           <div style={{ textAlign: 'center' }}>
             <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
