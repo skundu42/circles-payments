@@ -17,6 +17,7 @@
     "@circles-sdk/profiles": "^0.28.0",
     "@circles-sdk/sdk": "^0.28.0",
     "@circles-sdk/utils": "^0.28.0",
+    "@vercel/analytics": "^1.5.0",
     "antd": "^5.26.0",
     "ethers": "^6.14.3",
     "next": "15.3.3",
